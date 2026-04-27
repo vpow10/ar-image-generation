@@ -3,11 +3,13 @@ device: cuda
 
 dataset:
   name: pathmnist
+  root: data/medmnist
   size: 64
   batch_size: 32
   num_workers: 4
   download: true
   normalize: true
+  as_rgb: true
 
 tokenizer:
   name: vqvae_small
