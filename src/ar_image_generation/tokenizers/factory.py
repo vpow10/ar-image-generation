@@ -2,7 +2,12 @@ from ar_image_generation.config import TokenizerConfig
 from ar_image_generation.tokenizers.vqvae import VQVAE
 
 
-def build_tokenizer(cfg: TokenizerConfig, *, image_size: int, image_channels: int = 3) -> VQVAE:
+def build_tokenizer(
+    cfg: TokenizerConfig,
+    *,
+    image_size: int,
+    image_channels: int = 3,
+) -> VQVAE:
     if cfg.name != "vqvae_small":
         raise ValueError(f"Unknown tokenizer: {cfg.name}")
 
@@ -14,4 +19,6 @@ def build_tokenizer(cfg: TokenizerConfig, *, image_size: int, image_channels: in
         hidden_channels=cfg.hidden_channels,
         downsample_factor=cfg.downsample_factor,
         commitment_cost=cfg.train.commitment_cost,
+        reconstruction_l1_weight=cfg.train.reconstruction_l1_weight,
+        reconstruction_mse_weight=cfg.train.reconstruction_mse_weight,
     )

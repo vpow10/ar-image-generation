@@ -21,10 +21,14 @@ class DatasetConfig(BaseModel):
 class TokenizerTrainConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    epochs: int = 50
+    epochs: int = 60
     lr: float = 2e-4
     weight_decay: float = 0.0
+
     commitment_cost: float = 0.25
+
+    reconstruction_l1_weight: float = 1.0
+    reconstruction_mse_weight: float = 0.25
 
 
 class TokenizerConfig(BaseModel):

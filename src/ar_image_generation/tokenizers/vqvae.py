@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 
 import torch
 import torch.nn.functional as F
@@ -13,9 +14,29 @@ class VQVAEOutput:
     indices: torch.LongTensor
     loss: torch.Tensor
     reconstruction_loss: torch.Tensor
+    l1_reconstruction_loss: torch.Tensor
+    mse_reconstruction_loss: torch.Tensor
     quantization_loss: torch.Tensor
     commitment_loss: torch.Tensor
     perplexity: torch.Tensor
+
+
+def _num_downsample_layers(downsample_factor: int) -> int:
+    if downsample_factor < 2:
+        raise ValueError(f"downsample_factor must be >= 2, got {downsample_factor}")
+
+    if downsample_factor & (downsample_factor - 1) != 0:
+        raise ValueError(f"downsample_factor must be a power of two, got {downsample_factor}")
+
+    return int(math.log2(downsample_factor))
+
+
+def _make_group_norm(channels: int) -> nn.GroupNorm:
+    for num_groups in (8, 4, 2, 1):
+        if channels % num_groups == 0:
+            return nn.GroupNorm(num_groups=num_groups, num_channels=channels)
+
+    raise ValueError(f"Could not create GroupNorm for channels={channels}")
 
 
 class ResidualBlock(nn.Module):
@@ -23,10 +44,10 @@ class ResidualBlock(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.GroupNorm(num_groups=8, num_channels=channels),
+            _make_group_norm(channels),
             nn.SiLU(),
             nn.Conv2d(channels, channels, kernel_size=3, padding=1),
-            nn.GroupNorm(num_groups=8, num_channels=channels),
+            _make_group_norm(channels),
             nn.SiLU(),
             nn.Conv2d(channels, channels, kernel_size=3, padding=1),
         )
@@ -41,22 +62,39 @@ class Encoder(nn.Module):
         in_channels: int,
         hidden_channels: int,
         embedding_dim: int,
+        num_downsample_layers: int,
     ) -> None:
         super().__init__()
 
-        # 64 -> 32 -> 16 -> 8
-        self.net = nn.Sequential(
-            nn.Conv2d(in_channels, hidden_channels, kernel_size=4, stride=2, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(hidden_channels, hidden_channels, kernel_size=4, stride=2, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(hidden_channels, hidden_channels, kernel_size=4, stride=2, padding=1),
-            ResidualBlock(hidden_channels),
-            ResidualBlock(hidden_channels),
-            nn.GroupNorm(num_groups=8, num_channels=hidden_channels),
-            nn.SiLU(),
-            nn.Conv2d(hidden_channels, embedding_dim, kernel_size=1),
+        layers: list[nn.Module] = []
+        current_channels = in_channels
+
+        for _ in range(num_downsample_layers):
+            layers.extend(
+                [
+                    nn.Conv2d(
+                        current_channels,
+                        hidden_channels,
+                        kernel_size=4,
+                        stride=2,
+                        padding=1,
+                    ),
+                    nn.SiLU(),
+                ]
+            )
+            current_channels = hidden_channels
+
+        layers.extend(
+            [
+                ResidualBlock(hidden_channels),
+                ResidualBlock(hidden_channels),
+                _make_group_norm(hidden_channels),
+                nn.SiLU(),
+                nn.Conv2d(hidden_channels, embedding_dim, kernel_size=1),
+            ]
         )
+
+        self.net = nn.Sequential(*layers)
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         return self.net(images)
@@ -68,27 +106,38 @@ class Decoder(nn.Module):
         out_channels: int,
         hidden_channels: int,
         embedding_dim: int,
+        num_upsample_layers: int,
     ) -> None:
         super().__init__()
 
-        # 8 -> 16 -> 32 -> 64
-        self.net = nn.Sequential(
+        layers: list[nn.Module] = [
             nn.Conv2d(embedding_dim, hidden_channels, kernel_size=3, padding=1),
             ResidualBlock(hidden_channels),
             ResidualBlock(hidden_channels),
-            nn.GroupNorm(num_groups=8, num_channels=hidden_channels),
+            _make_group_norm(hidden_channels),
             nn.SiLU(),
-            nn.ConvTranspose2d(
-                hidden_channels, hidden_channels, kernel_size=4, stride=2, padding=1
-            ),
-            nn.SiLU(),
-            nn.ConvTranspose2d(
-                hidden_channels, hidden_channels, kernel_size=4, stride=2, padding=1
-            ),
-            nn.SiLU(),
-            nn.ConvTranspose2d(hidden_channels, out_channels, kernel_size=4, stride=2, padding=1),
-            nn.Tanh(),
-        )
+        ]
+
+        for layer_index in range(num_upsample_layers):
+            is_last_layer = layer_index == num_upsample_layers - 1
+            next_channels = out_channels if is_last_layer else hidden_channels
+
+            layers.append(
+                nn.ConvTranspose2d(
+                    hidden_channels,
+                    next_channels,
+                    kernel_size=4,
+                    stride=2,
+                    padding=1,
+                )
+            )
+
+            if not is_last_layer:
+                layers.append(nn.SiLU())
+
+        layers.append(nn.Tanh())
+
+        self.net = nn.Sequential(*layers)
 
     def forward(self, latents: torch.Tensor) -> torch.Tensor:
         return self.net(latents)
@@ -126,11 +175,10 @@ class VectorQuantizer(nn.Module):
             perplexity: codebook usage perplexity
         """
 
-        b, d, h, w = z_e.shape
+        batch_size, embedding_dim, height, width = z_e.shape
 
-        # [B, D, H, W] -> [B, H, W, D] -> [B*H*W, D]
         z = z_e.permute(0, 2, 3, 1).contiguous()
-        flat_z = z.view(-1, d)
+        flat_z = z.view(-1, embedding_dim)
 
         embedding_weight = self.embedding.weight
 
@@ -141,15 +189,15 @@ class VectorQuantizer(nn.Module):
         )
 
         flat_indices = torch.argmin(distances, dim=1)
-        indices = flat_indices.view(b, h, w)
+        indices = flat_indices.view(batch_size, height, width)
 
         z_q = self.embedding(flat_indices)
-        z_q = z_q.view(b, h, w, d).permute(0, 3, 1, 2).contiguous()
+        z_q = z_q.view(batch_size, height, width, embedding_dim)
+        z_q = z_q.permute(0, 3, 1, 2).contiguous()
 
         quantization_loss = F.mse_loss(z_q, z_e.detach())
         commitment_loss = F.mse_loss(z_e, z_q.detach()) * self.commitment_cost
 
-        # Straight-through estimator.
         z_q_st = z_e + (z_q - z_e).detach()
 
         one_hot = F.one_hot(flat_indices, num_classes=self.vocab_size).float()
@@ -177,26 +225,38 @@ class VQVAE(ImageTokenizer):
         *,
         image_channels: int = 3,
         image_size: int = 64,
-        vocab_size: int = 512,
+        vocab_size: int = 1024,
         embedding_dim: int = 128,
         hidden_channels: int = 128,
-        downsample_factor: int = 8,
+        downsample_factor: int = 4,
         commitment_cost: float = 0.25,
+        reconstruction_l1_weight: float = 1.0,
+        reconstruction_mse_weight: float = 0.25,
     ) -> None:
         super().__init__()
 
         if image_size % downsample_factor != 0:
             raise ValueError(
-                f"image_size={image_size} must be divisible by downsample_factor={downsample_factor}"
+                f"image_size={image_size} must be divisible by "
+                f"downsample_factor={downsample_factor}"
             )
 
+        num_downsample_layers = _num_downsample_layers(downsample_factor)
+
         self.vocab_size = vocab_size
-        self.latent_shape = (image_size // downsample_factor, image_size // downsample_factor)
+        self.latent_shape = (
+            image_size // downsample_factor,
+            image_size // downsample_factor,
+        )
+
+        self.reconstruction_l1_weight = reconstruction_l1_weight
+        self.reconstruction_mse_weight = reconstruction_mse_weight
 
         self.encoder = Encoder(
             in_channels=image_channels,
             hidden_channels=hidden_channels,
             embedding_dim=embedding_dim,
+            num_downsample_layers=num_downsample_layers,
         )
         self.quantizer = VectorQuantizer(
             vocab_size=vocab_size,
@@ -207,6 +267,7 @@ class VQVAE(ImageTokenizer):
             out_channels=image_channels,
             hidden_channels=hidden_channels,
             embedding_dim=embedding_dim,
+            num_upsample_layers=num_downsample_layers,
         )
 
     def forward(self, images: torch.Tensor) -> VQVAEOutput:
@@ -214,7 +275,14 @@ class VQVAE(ImageTokenizer):
         z_q, indices, quantization_loss, commitment_loss, perplexity = self.quantizer(z_e)
         reconstructions = self.decoder(z_q)
 
-        reconstruction_loss = F.mse_loss(reconstructions, images)
+        l1_reconstruction_loss = F.l1_loss(reconstructions, images)
+        mse_reconstruction_loss = F.mse_loss(reconstructions, images)
+
+        reconstruction_loss = (
+            self.reconstruction_l1_weight * l1_reconstruction_loss
+            + self.reconstruction_mse_weight * mse_reconstruction_loss
+        )
+
         loss = reconstruction_loss + quantization_loss + commitment_loss
 
         return VQVAEOutput(
@@ -222,6 +290,8 @@ class VQVAE(ImageTokenizer):
             indices=indices,
             loss=loss,
             reconstruction_loss=reconstruction_loss,
+            l1_reconstruction_loss=l1_reconstruction_loss,
+            mse_reconstruction_loss=mse_reconstruction_loss,
             quantization_loss=quantization_loss,
             commitment_loss=commitment_loss,
             perplexity=perplexity,
