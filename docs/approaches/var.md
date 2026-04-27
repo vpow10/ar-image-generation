@@ -9,7 +9,26 @@ image resolution: 64 x 64
 latent resolution: 8 x 8
 scale schedule: 1x1 -> 2x2 -> 4x4 -> 8x8
 ```
-The implementation should live in:
+
+## Project implementation
+The project uses a simplified VAR-style setup:
+
+1. A VQ-VAE converts images into discrete 8x8 latent token grids.
+2. The 8x8 token grid is downsampled with nearest-neighbor sampling to create coarse token grids.
+3. The transformer predicts each next scale conditioned on previous scales.
+
+The flattened sequence is:
 ```text
-src/ar_image_gen/approaches/var/
+[BOS] [1x1 tokens] [2x2 tokens] [4x4 tokens] [8x8 tokens]
+```
+The attention rule is:
+```text
+tokens at scale k may attend to BOS and all previous scales, but not to the same scale or future scales
+```
+This avoids direct same-scale target leakage during training.
+
+## Files
+```text
+src/ar_image_generation/approaches/var/schedule.py
+src/ar_image_generation/approaches/var/multiscale.py
 ```
