@@ -1,0 +1,6 @@
+name: pathmnist
+size: 64
+batch_size: 32
+num_workers: 4
+download: true
+normalize: true

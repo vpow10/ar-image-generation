@@ -1,0 +1,49 @@
+seed: 47
+device: cuda
+
+dataset:
+  name: pathmnist
+  size: 64
+  batch_size: 32
+  num_workers: 4
+  download: true
+  normalize: true
+
+tokenizer:
+  name: vqvae_small
+  checkpoint_path: checkpoints/tokenizer/pathmnist64_vqvae.pt
+  vocab_size: 512
+  embedding_dim: 128
+  hidden_channels: 128
+  downsample_factor: 8
+
+approach:
+  name: var
+  dim: 384
+  depth: 6
+  num_heads: 6
+  mlp_ratio: 4
+  dropout: 0.1
+  scales: [1, 2, 4, 8]
+  class_conditional: false
+
+train:
+  epochs: 100
+  lr: 0.0003
+  weight_decay: 0.01
+  grad_clip_norm: 1.0
+  mixed_precision: true
+  log_every_steps: 50
+  sample_every_epochs: 5
+  save_every_epochs: 10
+
+sampling:
+  temperature: 1.0
+  top_k: 100
+  top_p: null
+  num_samples: 64
+
+logging:
+  use_wandb: false
+  project: ar-image-generation
+  run_name: var_pathmnist64_debug

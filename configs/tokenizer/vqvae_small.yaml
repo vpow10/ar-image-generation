@@ -1,0 +1,13 @@
+name: vqvae_small
+checkpoint_path: checkpoints/tokenizer/pathmnist64_vqvae.pt
+
+vocab_size: 512
+embedding_dim: 128
+hidden_channels: 128
+downsample_factor: 8
+
+train:
+  epochs: 50
+  lr: 0.0002
+  weight_decay: 0.0
+  commitment_cost: 0.25

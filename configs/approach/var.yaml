@@ -1,0 +1,10 @@
+name: var
+
+dim: 384
+depth: 6
+num_heads: 6
+mlp_ratio: 4
+dropout: 0.1
+
+scales: [1, 2, 4, 8]
+class_conditional: false
