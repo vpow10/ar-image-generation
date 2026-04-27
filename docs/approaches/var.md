@@ -32,3 +32,29 @@ This avoids direct same-scale target leakage during training.
 src/ar_image_generation/approaches/var/schedule.py
 src/ar_image_generation/approaches/var/multiscale.py
 ```
+
+## Model implementation
+
+The current implementation uses a simplified educational VAR objective.
+
+For each scale:
+
+```text
+context = BOS + lower-resolution token grids
+target = current-resolution token grid
+```
+The current scale is represented with learned query embeddings rather than ground-truth target token embeddings. This avoids target leakage through transformer residual connections.
+
+Training objective:
+```text
+cross-entropy over all multiscale target tokens
+```
+Generation:
+```text
+1x1 tokens -> 2x2 tokens -> 4x4 tokens -> 8x8 tokens -> VQ-VAE decode
+```
+Implemented files:
+```text
+src/ar_image_generation/approaches/var/model.py
+src/ar_image_generation/approaches/var/sampler.py
+```
