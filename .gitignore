@@ -1,10 +1,32 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
 
-# Virtual environments
-.venv
+# Project artifacts
+data/*
+!data/.gitkeep
+
+runs/*
+!runs/.gitkeep
+
+checkpoints/*
+!checkpoints/.gitkeep
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Env
+.env
