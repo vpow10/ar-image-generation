@@ -31,7 +31,8 @@ uv check
 Train tokenizer:
 
 ```bash
-uv run python scripts/train_tokenizer.py --config configs/experiment/var_pathmnist64_debug.yaml
+uv run python scripts/train_tokenizer.py \
+  --config configs/experiment/var_pathmnist64_debug.yaml
 ```
 
 Train generation approach:
@@ -50,4 +51,21 @@ Evaluate:
 
 ```bash
 uv run python scripts/evaluate.py --config configs/experiment/var_pathmnist64_debug.yaml
+```
+
+## VAR
+
+Train VAR:
+
+```bash
+uv run python scripts/train_approach.py \
+  --config configs/experiment/var_pathmnist64_debug.yaml
+```
+
+Sample from trained VAR:
+
+```bash
+uv run python scripts/sample.py \
+  --config configs/experiment/var_pathmnist64_debug.yaml \
+  --output runs/samples/var_samples.png
 ```
