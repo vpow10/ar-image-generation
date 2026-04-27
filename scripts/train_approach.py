@@ -22,6 +22,8 @@ from ar_image_generation.approaches.base import AutoregressiveApproach
 from ar_image_generation.utils.device import get_device
 from ar_image_generation.utils.image_grid import save_image_grid
 from ar_image_generation.utils.seed import seed_everything
+from ar_image_generation.evaluation.io import append_jsonl, save_json
+from ar_image_generation.evaluation.metrics import count_parameters
 
 
 def parse_args() -> argparse.Namespace:
@@ -238,6 +240,9 @@ def main() -> None:
         latent_shape=tokenizer.latent_shape,
     ).to(device)
 
+    num_trainable_parameters = count_parameters(model, trainable_only=True)
+    num_total_parameters = count_parameters(model, trainable_only=False)
+
     optimizer = AdamW(
         model.parameters(),
         lr=cfg.train.lr,
@@ -261,6 +266,8 @@ def main() -> None:
     print(f"mixed precision:  {mixed_precision}")
     print(f"epochs:           {epochs}")
     print(f"run dir:          {run_dir}")
+    print(f"trainable params: {num_trainable_parameters:,}")
+    print(f"total params:     {num_total_parameters:,}")
 
     best_val_loss = float("inf")
 
@@ -295,6 +302,19 @@ def main() -> None:
             **{f"train_{key}": value for key, value in train_metrics.items()},
             **{f"val_{key}": value for key, value in val_metrics.items()},
         }
+
+        epoch_record = {
+            "epoch": epoch,
+            "train": train_metrics,
+            "val": val_metrics,
+            "parameters": {
+                "trainable": num_trainable_parameters,
+                "total": num_total_parameters,
+            },
+        }
+
+        append_jsonl(epoch_record, run_dir / "metrics.jsonl")
+        save_json(epoch_record, run_dir / "latest_metrics.json")
 
         save_model_checkpoint(
             path=checkpoints_dir / "last.pt",
@@ -347,6 +367,20 @@ def main() -> None:
         device=device,
         sampling_cfg=sampling_cfg,
     )
+
+    summary = {
+        "best_val_loss": best_val_loss,
+        "best_checkpoint": str(checkpoints_dir / "best.pt"),
+        "stable_checkpoint": str(
+            Path("checkpoints") / "approaches" / cfg.approach.name / "best.pt"
+        ),
+        "parameters": {
+            "trainable": num_trainable_parameters,
+            "total": num_total_parameters,
+        },
+    }
+
+    save_json(summary, run_dir / "summary.json")
 
     print(f"best val loss: {best_val_loss:.4f}")
     print(f"best checkpoint: {checkpoints_dir / 'best.pt'}")

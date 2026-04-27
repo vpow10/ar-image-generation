@@ -47,11 +47,33 @@ Sample:
 uv run python scripts/sample.py --config configs/experiment/var_pathmnist64_debug.yaml
 ```
 
-Evaluate:
+Evaluate trained approach
 
 ```bash
-uv run python scripts/evaluate.py --config configs/experiment/var_pathmnist64_debug.yaml
+uv run python scripts/evaluate.py \
+  --config configs/experiment/var_pathmnist64_debug.yaml \
+  --split test \
+  --output-dir runs/eval/var_pathmnist64
 ```
+
+Fast evaluation:
+```bash
+uv run python scripts/evaluate.py \
+  --config configs/experiment/var_pathmnist64_debug.yaml \
+  --split val \
+  --max-loss-batches 10 \
+  --num-samples 64 \
+  --output-dir runs/eval/var_quick
+```
+
+Evaluation outputs:
+```text
+runs/eval/<name>/
+├── metrics.json
+├── samples.png
+└── samples.pt
+```
+
 
 ## VAR
 
