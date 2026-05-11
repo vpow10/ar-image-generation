@@ -1,0 +1,59 @@
+seed: 123
+device: cuda
+
+dataset:
+  name: pathmnist
+  root: data/medmnist
+  size: 64
+  batch_size: 16
+  num_workers: 4
+  download: true
+  normalize: true
+  as_rgb: true
+
+tokenizer:
+  name: vqvae_small
+  checkpoint_path: checkpoints/tokenizer/pathmnist64_vqvae_d4_v2.pt
+  vocab_size: 1024
+  embedding_dim: 192
+  hidden_channels: 192
+  downsample_factor: 4
+
+  train:
+    epochs: 60
+    lr: 0.0002
+    weight_decay: 0.0
+    commitment_cost: 0.25
+    reconstruction_l1_weight: 1.0
+    reconstruction_mse_weight: 0.25
+
+approach:
+  name: var
+  dim: 384
+  depth: 6
+  num_heads: 6
+  mlp_ratio: 4
+  dropout: 0.1
+  scales: [1, 2, 4, 8, 16]
+  class_conditional: false
+
+train:
+  epochs: 80
+  lr: 0.0002
+  weight_decay: 0.01
+  grad_clip_norm: 1.0
+  mixed_precision: true
+  log_every_steps: 50
+  sample_every_epochs: 10
+  save_every_epochs: 10
+
+sampling:
+  temperature: 0.8
+  top_k: 100
+  top_p: null
+  num_samples: 64
+
+logging:
+  use_wandb: false
+  project: ar-image-generation
+  run_name: var_pathmnist64_d4_v2_imagepyramid
