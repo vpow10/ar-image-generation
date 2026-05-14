@@ -2,12 +2,34 @@ import torch
 import pytest
 
 from ar_image_generation.approaches.var.multiscale import (
-    build_multiscale_sequence,
-    build_multiscale_token_grids,
-    build_next_scale_attention_mask,
-    build_scale_ids,
+    build_image_pyramid_token_grids,
+    build_multiscale_sequence_from_images,
 )
 from ar_image_generation.approaches.var.schedule import VARSchedule
+from ar_image_generation.tokenizers.base import ImageTokenizer
+
+
+class DummyTokenizer(ImageTokenizer):
+    def __init__(self, vocab_size: int = 64) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.latent_shape = (8, 8)
+
+    @torch.no_grad()
+    def encode(self, images: torch.Tensor) -> torch.LongTensor:
+        latent_size = images.shape[-1] // 8
+
+        return torch.zeros(
+            images.shape[0],
+            latent_size,
+            latent_size,
+            device=images.device,
+            dtype=torch.long,
+        )
+
+    @torch.no_grad()
+    def decode(self, tokens: torch.LongTensor) -> torch.Tensor:
+        return torch.zeros(tokens.shape[0], 3, 64, 64)
 
 
 def test_var_schedule_properties() -> None:
@@ -23,11 +45,13 @@ def test_var_schedule_rejects_non_increasing_scales() -> None:
         VARSchedule(scales=(1, 4, 4, 8))
 
 
-def test_build_multiscale_token_grids_shapes() -> None:
+def test_build_image_pyramid_token_grids_shapes() -> None:
     schedule = VARSchedule(scales=(1, 2, 4, 8))
-    tokens = torch.arange(2 * 8 * 8).reshape(2, 8, 8).long()
+    tokenizer = DummyTokenizer()
 
-    grids = build_multiscale_token_grids(tokens, schedule)
+    images = torch.randn(2, 3, 64, 64)
+
+    grids = build_image_pyramid_token_grids(images, tokenizer, schedule)
 
     assert len(grids) == 4
     assert grids[0].shape == (2, 1, 1)
@@ -36,55 +60,12 @@ def test_build_multiscale_token_grids_shapes() -> None:
     assert grids[3].shape == (2, 8, 8)
 
 
-def test_build_multiscale_sequence_shape() -> None:
+def test_build_multiscale_sequence_from_images_shape() -> None:
     schedule = VARSchedule(scales=(1, 2, 4, 8))
-    tokens = torch.randint(low=0, high=512, size=(2, 8, 8)).long()
+    tokenizer = DummyTokenizer()
 
-    sequence = build_multiscale_sequence(tokens, schedule)
+    images = torch.randn(2, 3, 64, 64)
+
+    sequence = build_multiscale_sequence_from_images(images, tokenizer, schedule)
 
     assert sequence.shape == (2, 85)
-
-
-def test_build_scale_ids_with_bos() -> None:
-    schedule = VARSchedule(scales=(1, 2, 4))
-    scale_ids = build_scale_ids(schedule, include_bos=True)
-
-    assert scale_ids.shape == (1 + 1 + 4 + 16,)
-    assert scale_ids[0].item() == -1
-    assert scale_ids[1].item() == 0
-    assert scale_ids[2].item() == 1
-    assert scale_ids[-1].item() == 2
-
-
-def test_next_scale_attention_mask_rules() -> None:
-    schedule = VARSchedule(scales=(1, 2, 4))
-    mask = build_next_scale_attention_mask(schedule, include_bos=True)
-
-    # Total sequence length:
-    # BOS + 1x1 + 2x2 + 4x4
-    assert mask.shape == (22, 22)
-
-    # BOS attends only to itself.
-    assert mask[0, 0]
-    assert not mask[0, 1:].any()
-
-    # First 1x1 scale token attends to BOS only.
-    assert mask[1, 0]
-    assert not mask[1, 1]
-
-    # First 2x2 scale token attends to BOS and previous 1x1 scale.
-    assert mask[2, 0]
-    assert mask[2, 1]
-
-    # But it does not attend to same-scale 2x2 tokens.
-    assert not mask[2, 2]
-    assert not mask[2, 3]
-
-    # First 4x4 scale token attends to previous scales.
-    first_4x4_position = 1 + 1 + 4
-    assert mask[first_4x4_position, 0]
-    assert mask[first_4x4_position, 1]
-    assert mask[first_4x4_position, 2]
-
-    # But it does not attend to itself.
-    assert not mask[first_4x4_position, first_4x4_position]

@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
 def move_batch_to_device(batch: ImageBatch, device: torch.device) -> ImageBatch:
     return ImageBatch(
         images=batch.images.to(device, non_blocking=True),
-        labels=None if batch.labels is None else batch.labels.to(device, non_blocking=True),
+        labels=(None if batch.labels is None else batch.labels.to(device, non_blocking=True)),
         metadata=batch.metadata,
     )
 
@@ -211,11 +211,15 @@ def main() -> None:
     print(f"batch size:    {cfg.dataset.batch_size}")
     print(f"latent shape:  {model.latent_shape}")
     print(f"vocab size:    {model.vocab_size}")
+    print(f"embedding dim: {cfg.tokenizer.embedding_dim}")
+    print(f"hidden ch:     {cfg.tokenizer.hidden_channels}")
+    print(f"downsample:    {cfg.tokenizer.downsample_factor}")
+    print(f"ckpt path:     {cfg.tokenizer.checkpoint_path}")
     print(f"device:        {device}")
     print(f"mixed precision: {mixed_precision}")
     print(f"run dir:       {run_dir}")
 
-    best_val_loss = float("inf")
+    best_val_reconstruction_loss = float("inf")
 
     for epoch in range(1, epochs + 1):
         train_metrics = train_one_epoch(
@@ -264,8 +268,8 @@ def main() -> None:
             device=device,
         )
 
-        if val_metrics["loss"] < best_val_loss:
-            best_val_loss = val_metrics["loss"]
+        if val_metrics["reconstruction_loss"] < best_val_reconstruction_loss:
+            best_val_reconstruction_loss = val_metrics["reconstruction_loss"]
             best_checkpoint_path = checkpoints_dir / "best.pt"
 
             save_tokenizer_checkpoint(
@@ -280,7 +284,7 @@ def main() -> None:
             cfg.tokenizer.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(best_checkpoint_path, cfg.tokenizer.checkpoint_path)
 
-    print(f"best val loss: {best_val_loss:.4f}")
+    print(f"best val reconstruction loss: {best_val_reconstruction_loss:.4f}")
     print(f"saved tokenizer: {cfg.tokenizer.checkpoint_path}")
 
 

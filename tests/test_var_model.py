@@ -3,6 +3,7 @@ import torch
 from ar_image_generation.approaches.base import SamplingConfig
 from ar_image_generation.approaches.registry import build_approach
 from ar_image_generation.approaches.var.model import VARApproach
+from ar_image_generation.data.batch import ImageBatch
 from ar_image_generation.tokenizers.base import ImageTokenizer
 
 
@@ -14,10 +15,17 @@ class DummyTokenizer(ImageTokenizer):
 
     @torch.no_grad()
     def encode(self, images: torch.Tensor) -> torch.LongTensor:
+        height = images.shape[-2]
+
+        if height % 8 != 0:
+            raise ValueError("Dummy tokenizer expects image height divisible by 8.")
+
+        latent_size = height // 8
+
         return torch.zeros(
             images.shape[0],
-            self.latent_shape[0],
-            self.latent_shape[1],
+            latent_size,
+            latent_size,
             device=images.device,
             dtype=torch.long,
         )
@@ -48,28 +56,32 @@ def build_small_var() -> VARApproach:
     )
 
 
-def test_var_forward_shapes() -> None:
+def test_var_forward_sequence_shapes() -> None:
     model = build_small_var()
-    tokens = torch.randint(low=0, high=64, size=(2, 8, 8), dtype=torch.long)
 
-    output = model(tokens)
+    targets = torch.randint(low=0, high=64, size=(2, 85), dtype=torch.long)
+
+    output = model.forward_sequence(targets)
 
     assert output.logits.shape == (2, 85, 64)
     assert output.targets.shape == (2, 85)
     assert output.loss.ndim == 0
 
 
-def test_var_predict_single_scale_shape() -> None:
+def test_var_training_step_returns_scalar_loss() -> None:
     model = build_small_var()
+    tokenizer = DummyTokenizer(vocab_size=64, latent_shape=(8, 8))
 
-    logits = model.predict_scale_logits(
-        context_tokens=None,
-        scale_index=0,
-        batch_size=2,
-        device=torch.device("cpu"),
+    batch = ImageBatch(
+        images=torch.randn(2, 3, 64, 64),
+        labels=None,
+        metadata=None,
     )
 
-    assert logits.shape == (2, 1, 64)
+    output = model.training_step(batch, tokenizer)
+
+    assert "loss" in output
+    assert output["loss"].ndim == 0
 
 
 def test_var_generate_shapes() -> None:

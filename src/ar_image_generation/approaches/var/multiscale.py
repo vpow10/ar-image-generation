@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from ar_image_generation.approaches.var.schedule import VARSchedule
+from ar_image_generation.tokenizers.base import ImageTokenizer
 
 
 def validate_token_grid(tokens: torch.Tensor) -> None:
@@ -14,47 +15,70 @@ def validate_token_grid(tokens: torch.Tensor) -> None:
         raise ValueError(f"Expected square token grid, got {height}x{width}")
 
 
-def downsample_token_grid(tokens: torch.LongTensor, size: int) -> torch.LongTensor:
-    """
-    Downsample a discrete token grid with nearest-neighbor sampling.
-
-    This is a simple project-friendly approximation for VAR-style multiscale targets.
-    Full VAR-style implementations may use richer scale-specific quantization.
-    """
-
-    validate_token_grid(tokens)
-
-    if size <= 0:
-        raise ValueError(f"size must be positive, got {size}")
-
-    tokens_float = tokens.float().unsqueeze(1)
-    resized = F.interpolate(tokens_float, size=(size, size), mode="nearest")
-    return resized.squeeze(1).long()
-
-
-def build_multiscale_token_grids(
-    tokens: torch.LongTensor,
+def build_image_pyramid_token_grids(
+    images: torch.Tensor,
+    tokenizer: ImageTokenizer,
     schedule: VARSchedule,
 ) -> list[torch.LongTensor]:
     """
-    Args:
-        tokens: full-resolution latent tokens [B, H, W]
+    Build meaningful VAR multiscale targets from an image pyramid.
 
-    Returns:
-        list of token grids:
-            [B, 1, 1], [B, 2, 2], ..., [B, H, W]
+    For a 64x64 image and final latent scale 16:
+
+        scale 1  -> resize image to 4x4   -> tokenizer.encode -> 1x1 tokens
+        scale 2  -> resize image to 8x8   -> tokenizer.encode -> 2x2 tokens
+        scale 4  -> resize image to 16x16 -> tokenizer.encode -> 4x4 tokens
+        scale 8  -> resize image to 32x32 -> tokenizer.encode -> 8x8 tokens
+        scale 16 -> original 64x64        -> tokenizer.encode -> 16x16 tokens
+
+    This is much more meaningful than downsampling categorical token IDs.
     """
 
-    validate_token_grid(tokens)
+    if images.ndim != 4:
+        raise ValueError(f"Expected images [B, C, H, W], got shape {tuple(images.shape)}")
 
-    final_height = tokens.shape[-2]
-    if final_height != schedule.final_scale:
+    image_height, image_width = images.shape[-2:]
+
+    if image_height != image_width:
+        raise ValueError(f"Expected square images, got {image_height}x{image_width}")
+
+    final_scale = schedule.final_scale
+
+    if image_height % final_scale != 0:
         raise ValueError(
-            f"Token grid has final scale {final_height}, "
-            f"but schedule expects {schedule.final_scale}"
+            f"Image size {image_height} must be divisible by final latent scale {final_scale}"
         )
 
-    return [downsample_token_grid(tokens, scale) for scale in schedule.scales]
+    pixels_per_token = image_height // final_scale
+
+    multiscale_tokens: list[torch.LongTensor] = []
+
+    for scale in schedule.scales:
+        target_image_size = scale * pixels_per_token
+
+        if target_image_size == image_height:
+            resized_images = images
+        else:
+            resized_images = F.interpolate(
+                images,
+                size=(target_image_size, target_image_size),
+                mode="bilinear",
+                align_corners=False,
+            )
+
+        tokens = tokenizer.encode(resized_images)
+
+        expected_shape = (images.shape[0], scale, scale)
+        if tuple(tokens.shape) != expected_shape:
+            raise ValueError(
+                f"Tokenizer returned shape {tuple(tokens.shape)} for scale {scale}, "
+                f"expected {expected_shape}. "
+                "Check tokenizer downsample factor and VAR scale schedule."
+            )
+
+        multiscale_tokens.append(tokens)
+
+    return multiscale_tokens
 
 
 def flatten_multiscale_token_grids(
@@ -85,12 +109,33 @@ def flatten_multiscale_token_grids(
     return torch.cat(flattened, dim=1)
 
 
-def build_multiscale_sequence(
+def build_multiscale_sequence_from_images(
+    images: torch.Tensor,
+    tokenizer: ImageTokenizer,
+    schedule: VARSchedule,
+) -> torch.LongTensor:
+    multiscale_tokens = build_image_pyramid_token_grids(images, tokenizer, schedule)
+    return flatten_multiscale_token_grids(multiscale_tokens)
+
+
+def build_multiscale_sequence_from_final_tokens(
     tokens: torch.LongTensor,
     schedule: VARSchedule,
 ) -> torch.LongTensor:
-    multiscale_tokens = build_multiscale_token_grids(tokens, schedule)
-    return flatten_multiscale_token_grids(multiscale_tokens)
+    """
+    Test/debug fallback.
+    """
+
+    validate_token_grid(tokens)
+
+    final_height = tokens.shape[-2]
+    if final_height != schedule.final_scale:
+        raise ValueError(
+            f"Token grid has final scale {final_height}, "
+            f"but schedule expects {schedule.final_scale}"
+        )
+
+    return tokens.reshape(tokens.shape[0], -1)
 
 
 def build_scale_ids(
@@ -114,39 +159,3 @@ def build_scale_ids(
         ids.extend([scale_index] * (scale * scale))
 
     return torch.tensor(ids, dtype=torch.long, device=device)
-
-
-def build_next_scale_attention_mask(
-    schedule: VARSchedule,
-    *,
-    include_bos: bool = True,
-    device: torch.device | None = None,
-) -> torch.BoolTensor:
-    """
-    Build a VAR-style attention mask.
-
-    Rule:
-        - BOS attends only to BOS.
-        - Tokens at scale k may attend to BOS and all tokens from previous scales.
-        - Tokens may not attend to tokens from the same scale.
-        - Tokens may not attend to future scales.
-
-    This prevents direct leakage from target tokens at the same scale.
-    """
-
-    scale_ids = build_scale_ids(schedule, include_bos=include_bos, device=device)
-    query_scale_ids = scale_ids[:, None]
-    key_scale_ids = scale_ids[None, :]
-
-    if include_bos:
-        bos_id = -1
-        is_query_bos = query_scale_ids == bos_id
-        is_key_bos = key_scale_ids == bos_id
-
-        can_attend = is_key_bos | (key_scale_ids < query_scale_ids)
-        can_attend = can_attend & ~is_query_bos
-        can_attend[0, 0] = True
-
-        return can_attend
-
-    return key_scale_ids < query_scale_ids
