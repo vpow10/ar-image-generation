@@ -36,7 +36,9 @@ def constrain_primitives(
 
     expected_dim = primitive_parameter_dim(cfg.feature_dim)
     if raw_primitives.shape[-1] != expected_dim:
-        raise ValueError(f"Expected primitive dim {expected_dim}, got {raw_primitives.shape[-1]}")
+        raise ValueError(
+            f"Expected primitive dim {expected_dim}, got {raw_primitives.shape[-1]}"
+        )
 
     raw_position = raw_primitives[..., 0:2]
     raw_scale = raw_primitives[..., 2:4]
@@ -57,7 +59,10 @@ def constrain_primitives(
             raise ValueError(f"Expected anchors [..., 2], got {tuple(anchors.shape)}")
 
         offset = cfg.max_position_offset * torch.tanh(raw_position)
-        position = anchors.to(device=raw_primitives.device, dtype=raw_primitives.dtype) + offset
+        position = (
+            anchors.to(device=raw_primitives.device, dtype=raw_primitives.dtype)
+            + offset
+        )
         position = position.clamp(0.0, 1.0)
 
     scale_unit = torch.sigmoid(raw_scale)
@@ -86,4 +91,53 @@ def flatten_primitives(primitives: GaussianPrimitives) -> torch.Tensor:
             primitives.feature,
         ],
         dim=-1,
+    )
+
+
+def primitives_from_flattened(
+    flattened: torch.Tensor,
+    cfg: GaussianPrimitiveConfig,
+    anchors: torch.Tensor | None = None,
+) -> GaussianPrimitives:
+    if flattened.ndim != 3:
+        raise ValueError(
+            f"Expected flattened primitives [B, N, D], got {tuple(flattened.shape)}"
+        )
+
+    expected_dim = primitive_parameter_dim(cfg.feature_dim)
+    if flattened.shape[-1] != expected_dim:
+        raise ValueError(
+            f"Expected primitive dim {expected_dim}, got {flattened.shape[-1]}"
+        )
+
+    position = flattened[..., 0:2]
+    scale = flattened[..., 2:4]
+    rotation = flattened[..., 4:5]
+    opacity = flattened[..., 5:6]
+    feature = flattened[..., 6:]
+
+    if anchors is not None:
+        if cfg.max_position_offset is None:
+            raise ValueError("max_position_offset must be set when anchors are used.")
+
+        if anchors.ndim == 2:
+            anchors = anchors[None, :, :]
+
+        anchors = anchors.to(device=flattened.device, dtype=flattened.dtype)
+        min_position = anchors - cfg.max_position_offset
+        max_position = anchors + cfg.max_position_offset
+        position = torch.maximum(torch.minimum(position, max_position), min_position)
+
+    position = position.clamp(0.0, 1.0)
+    scale = scale.clamp(cfg.min_scale, cfg.max_scale)
+    rotation = rotation.clamp(-torch.pi, torch.pi)
+    opacity = opacity.clamp(0.0, 1.0)
+    feature = feature.clamp(-1.0, 1.0)
+
+    return GaussianPrimitives(
+        position=position,
+        scale=scale,
+        rotation=rotation,
+        opacity=opacity,
+        feature=feature,
     )
