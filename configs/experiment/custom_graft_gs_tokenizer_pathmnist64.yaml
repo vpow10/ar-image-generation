@@ -1,0 +1,45 @@
+seed: 123
+device: cuda
+
+dataset:
+  name: pathmnist
+  root: data/medmnist
+  size: 64
+  batch_size: 16
+  num_workers: 4
+  download: true
+  normalize: true
+  as_rgb: true
+
+tokenizer:
+  name: graft_gs
+  checkpoint_path: checkpoints/tokenizer/pathmnist64_graft_gs_v2.pt
+
+  image_size: 64
+  image_channels: 3
+  num_primitives: 256
+  primitive_feature_dim: 64
+  hidden_channels: 192
+  min_scale: 0.006
+  max_scale: 0.12
+  max_position_offset: 0.025
+  renderer_chunk_size: 64
+
+train:
+  epochs: 80
+  lr: 0.0002
+  weight_decay: 0.0
+  mixed_precision: true
+  grad_clip_norm: 1.0
+
+  reconstruction_l1_weight: 1.0
+  reconstruction_mse_weight: 0.25
+  opacity_weight: 0.01
+  scale_weight: 0.0001
+  coverage_weight: 0.02
+
+  sample_every_epochs: 5
+  save_every_epochs: 5
+
+logging:
+  run_name: graft_gs_tokenizer_pathmnist64_v2

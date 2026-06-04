@@ -68,9 +68,7 @@ class VARApproach(AutoregressiveApproach):
 
         if self.class_conditional:
             if self.num_classes is None or self.num_classes <= 0:
-                raise ValueError(
-                    "num_classes must be provided for class-conditional VAR."
-                )
+                raise ValueError("num_classes must be provided for class-conditional VAR.")
             self.class_embedding = nn.Embedding(self.num_classes, dim)
         else:
             self.class_embedding = None
