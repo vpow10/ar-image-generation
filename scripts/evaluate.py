@@ -3,15 +3,17 @@ from pathlib import Path
 
 import torch
 from torch.amp import autocast
+from torchmetrics.image.fid import FrechetInceptionDistance
+from torchmetrics.image.inception import InceptionScore
 from tqdm import tqdm
 
 from ar_image_generation.approaches.base import AutoregressiveApproach, SamplingConfig
 from ar_image_generation.approaches.factory import build_approach_from_config
 from ar_image_generation.config import ExperimentConfig, load_experiment_config
 from ar_image_generation.data.batch import ImageBatch
-from ar_image_generation.data.medmnist import build_dataloaders
+from ar_image_generation.data.medmnist import build_dataloaders, build_medmnist_dataloader
 from ar_image_generation.engine.checkpointing import load_model_checkpoint
-from ar_image_generation.evaluation.io import save_json
+from ar_image_generation.evaluation.io import append_csv_row, save_json
 from ar_image_generation.evaluation.metrics import count_parameters, measure_sampling_speed
 from ar_image_generation.tokenizers.base import ImageTokenizer
 from ar_image_generation.tokenizers.checkpoint import load_tokenizer_checkpoint
@@ -58,6 +60,37 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Limit number of batches for quick evaluation.",
+    )
+    parser.add_argument(
+        "--quality",
+        action="store_true",
+        help="Compute FID and Inception Score against the val split (experiment 1).",
+    )
+    parser.add_argument(
+        "--quality-split",
+        type=str,
+        default="val",
+        choices=["train", "val", "test"],
+        help="Dataset split used as real images for FID/IS. Default: val (10,004 images).",
+    )
+    parser.add_argument(
+        "--quality-batch-size",
+        type=int,
+        default=64,
+        help="Batch size for generation during quality evaluation.",
+    )
+    parser.add_argument(
+        "--quality-num-samples",
+        type=int,
+        default=None,
+        help="Limit real+generated images for FID/IS (default: full split). "
+             "Use e.g. 500 for a quick smoke test.",
+    )
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        help="CSV file to append one result row to (shared across all approaches for one experiment).",
     )
     return parser.parse_args()
 
@@ -189,6 +222,76 @@ def generate_samples(
     )
 
 
+@torch.no_grad()
+def evaluate_quality(
+    *,
+    model: AutoregressiveApproach,
+    tokenizer: ImageTokenizer,
+    cfg: ExperimentConfig,
+    device: torch.device,
+    quality_split: str,
+    quality_batch_size: int,
+    quality_num_samples: int | None,
+    sampling_cfg: SamplingConfig,
+) -> dict[str, float | int]:
+    """Experiment 1: FID and IS against the full quality_split (default val, 10,004 images).
+
+    Streams images incrementally — no full-set tensor held in memory.
+    quality_num_samples caps both real and generated images (useful for smoke tests).
+    """
+    # FID/IS use float64 internally — not supported on MPS. Always run on CPU.
+    cpu = torch.device("cpu")
+    fid = FrechetInceptionDistance(feature=2048, normalize=False).to(cpu)
+    is_metric = InceptionScore(normalize=False).to(cpu)
+
+    quality_loader = build_medmnist_dataloader(cfg.dataset, split=quality_split, shuffle=False)
+    num_real = min(quality_num_samples, len(quality_loader.dataset)) if quality_num_samples else len(quality_loader.dataset)
+
+    real_fed = 0
+    for batch in tqdm(quality_loader, desc=f"real ({quality_split}) → FID", leave=False):
+        remaining = num_real - real_fed
+        if remaining <= 0:
+            break
+        images = batch.images[:remaining]
+        real_u8 = (((images + 1.0) / 2.0).clamp(0.0, 1.0) * 255).to(torch.uint8)
+        fid.update(real_u8, real=True)
+        real_fed += len(images)
+
+    generated = 0
+    batch_cfg = SamplingConfig(
+        temperature=sampling_cfg.temperature,
+        top_k=sampling_cfg.top_k,
+        top_p=sampling_cfg.top_p,
+        num_samples=quality_batch_size,
+    )
+    with tqdm(total=real_fed, desc="generating → FID/IS", leave=False) as pbar:
+        while generated < real_fed:
+            batch_cfg.num_samples = min(quality_batch_size, real_fed - generated)
+            samples = generate_samples(
+                model=model,
+                tokenizer=tokenizer,
+                device=device,
+                sampling_cfg=batch_cfg,
+            )
+            fake_u8 = (((samples.cpu() + 1.0) / 2.0).clamp(0.0, 1.0) * 255).to(torch.uint8)
+            fid.update(fake_u8, real=False)
+            is_metric.update(fake_u8)
+            generated += batch_cfg.num_samples
+            pbar.update(batch_cfg.num_samples)
+
+    fid_score = fid.compute().item()
+    is_mean, is_std = is_metric.compute()
+
+    return {
+        "fid": fid_score,
+        "inception_score_mean": is_mean.item(),
+        "inception_score_std": is_std.item(),
+        "num_real": real_fed,
+        "num_generated": generated,
+        "quality_split": quality_split,
+    }
+
+
 def main() -> None:
     args = parse_args()
 
@@ -258,6 +361,19 @@ def main() -> None:
         measured_steps=3,
     )
 
+    quality_metrics: dict | None = None
+    if args.quality:
+        quality_metrics = evaluate_quality(
+            model=model,
+            tokenizer=tokenizer,
+            cfg=cfg,
+            device=device,
+            quality_split=args.quality_split,
+            quality_batch_size=args.quality_batch_size,
+            quality_num_samples=args.quality_num_samples,
+            sampling_cfg=sampling_cfg,
+        )
+
     metrics = {
         "approach": cfg.approach.name,
         "checkpoint": str(checkpoint_path),
@@ -291,7 +407,22 @@ def main() -> None:
         "mixed_precision": mixed_precision,
     }
 
+    if quality_metrics is not None:
+        metrics["quality"] = quality_metrics
+
     save_json(metrics, output_dir / "metrics.json")
+
+    if args.csv is not None:
+        csv_row = {
+            "approach": cfg.approach.name,
+            "loss": loss_metrics["loss"],
+            "samples_per_second": speed.samples_per_second,
+            "trainable_params": metrics["parameters"]["trainable"],
+            "fid": quality_metrics["fid"] if quality_metrics else "",
+            "inception_score_mean": quality_metrics["inception_score_mean"] if quality_metrics else "",
+            "inception_score_std": quality_metrics["inception_score_std"] if quality_metrics else "",
+        }
+        append_csv_row(csv_row, args.csv)
 
     print("Evaluation complete")
     print("-------------------")
@@ -301,6 +432,9 @@ def main() -> None:
     print(f"loss:          {loss_metrics['loss']:.4f}")
     print(f"samples/sec:   {speed.samples_per_second:.2f}")
     print(f"trainable params: {metrics['parameters']['trainable']:,}")
+    if quality_metrics is not None:
+        print(f"FID:           {quality_metrics['fid']:.4f}  (lower is better)")
+        print(f"IS:            {quality_metrics['inception_score_mean']:.4f} ± {quality_metrics['inception_score_std']:.4f}  (higher is better)")
     print(f"output dir:    {output_dir}")
 
 
