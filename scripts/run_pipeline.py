@@ -165,6 +165,17 @@ def parse_args() -> argparse.Namespace:
         help="Override number of images for FID/IS. "
              "Defaults: 5 (--quick) or full val split.",
     )
+    parser.add_argument(
+        "--no-convergence",
+        action="store_true",
+        help="Skip Experiment 4 (learning curves plot).",
+    )
+    parser.add_argument(
+        "--convergence-only",
+        action="store_true",
+        help="Run only Experiment 4 (learning curves plot). "
+             "Skips training checks and Experiments 1–3.",
+    )
     return parser.parse_args()
 
 
@@ -224,6 +235,18 @@ def main() -> None:
 
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    # --convergence-only: skip Exp 1–3, go straight to the plot.
+    if args.convergence_only:
+        print(f"\n{'=' * 60}")
+        print("Experiment 4: Learning curves  (convergence-only mode)")
+        print(f"{'=' * 60}")
+        _run([
+            sys.executable, "scripts/plot_convergence.py",
+            "--configs", *[str(c) for c in approaches],
+            "--output-dir", str(results_dir),
+        ])
+        return
+
     total = len(approaches) * len(EXPERIMENTS)
     done = 0
     failed: list[str] = []
@@ -256,6 +279,17 @@ def main() -> None:
                 print(f"  FAILED (exit {rc}) — skipping remaining experiments for this approach.")
                 break
 
+    # Experiment 4 — learning curves (runs once for all approaches together).
+    if not args.no_convergence:
+        print(f"\n{'=' * 60}")
+        print("Experiment 4: Learning curves")
+        print(f"{'=' * 60}")
+        _run([
+            sys.executable, "scripts/plot_convergence.py",
+            "--configs", *[str(c) for c in approaches],
+            "--output-dir", str(results_dir),
+        ])
+
     print(f"\n{'=' * 60}")
     print(f"Pipeline complete  ({done}/{total} runs,  {len(failed)} failed)")
     if failed:
@@ -270,6 +304,9 @@ def main() -> None:
                 csv_path = results_dir / approach_name / experiment.csv_name
                 if csv_path.exists():
                     print(f"  {approach_name}/{experiment.csv_name}: {csv_path}")
+        convergence_png = results_dir / "convergence.png"
+        if convergence_png.exists():
+            print(f"  convergence plot: {convergence_png}")
 
 
 if __name__ == "__main__":
