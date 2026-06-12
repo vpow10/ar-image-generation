@@ -1,21 +1,13 @@
 """
 Experiments pipeline.
 
-*Auto-trains tokenizer + approach when checkpoints are missing
-*Device is selected automatically (CUDA/MPS/CPU)
+Auto-trains tokenizer + approach when checkpoints are missing, then runs all experiments.
+Device is selected automatically (CUDA -> MPS -> CPU).
 
-Modes
------
---quick   Smoke-test all three approaches with tiny models (3 epochs each).
-          Configs: smoke_test_raster, smoke_test_maskgit, smoke_test_var.
-          Tokenizer is trained once and reused across all three.
-          Quality evaluated on 5 generated samples.
-
-normal    Full training run for all three approaches on PathMNIST 64x64.
-          Configs: raster_pathmnist64_debug, maskgit_pathmnist64_debug, var_pathmnist64_d4.
-          Quality evaluated on the full val split (~10k images).
-
---approaches overrides the config list in either mode (one or more paths).
+Experiments (run for every approach)
+-------------------------------------
+  I.  quality       — FID + Inception Score on the val split  → quality.csv
+  II. speed_quality — FID + IS + samples/sec swept over temperatures → speed_quality.csv
 
 Approaches
 ----------
@@ -23,24 +15,68 @@ Approaches
   maskgit  — masked-token iterative generation (unconditional in debug config)
   var      — Visual AutoRegressive generation via multiscale image pyramid
 
-Usage
------
-  # quick smoke test — all three approaches, auto device
+=============================
+ QUICK MODE  (--quick flag)
+=============================
+Limits FID/IS to 5 generated samples. Auto-trains if checkpoints are missing.
+
+  -- Small models (smoke test, ~minutes) --
+
+  # all 3 approaches at once
   uv run python scripts/run_pipeline.py --quick
 
-  # full pipeline — all three approaches
-  uv run python scripts/run_pipeline.py
+  # raster only
+  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/smoke_test_raster.yaml
 
-  # single approach, full mode
-  uv run python scripts/run_pipeline.py --approaches configs/experiment/var_pathmnist64_d4.yaml
+  # maskgit only
+  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/smoke_test_maskgit.yaml
 
-  # single approach, quick mode
+  # var only
   uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/smoke_test_var.yaml
 
-  # two approaches at once
-  uv run python scripts/run_pipeline.py --approaches \\
-      configs/experiment/raster_pathmnist64_debug.yaml \\
-      configs/experiment/maskgit_pathmnist64_debug.yaml
+  -- Full models, quick eval (pre-trained checkpoints required) --
+
+  # all 3 approaches at once
+  uv run python scripts/run_pipeline.py --quick \\
+      --approaches configs/experiment/raster_pathmnist64_debug.yaml \\
+                   configs/experiment/maskgit_pathmnist64_debug.yaml \\
+                   configs/experiment/var_pathmnist64_d4.yaml
+
+  # raster only
+  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/raster_pathmnist64_debug.yaml
+
+  # maskgit only
+  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/maskgit_pathmnist64_debug.yaml
+
+  # var only
+  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/var_pathmnist64_d4.yaml
+
+=============================
+ FULL MODE  (no --quick)
+=============================
+FID/IS evaluated on the full val split (~10k images). Trains from scratch if needed.
+
+  -- All 3 approaches at once --
+
+  uv run python scripts/run_pipeline.py
+
+  -- Single approach --
+
+  # raster only
+  uv run python scripts/run_pipeline.py --approaches configs/experiment/raster_pathmnist64_debug.yaml
+
+  # maskgit only
+  uv run python scripts/run_pipeline.py --approaches configs/experiment/maskgit_pathmnist64_debug.yaml
+
+  # var only
+  uv run python scripts/run_pipeline.py --approaches configs/experiment/var_pathmnist64_d4.yaml
+
+=============================
+ OTHER OPTIONS
+=============================
+  --split {train,val,test}       dataset split for loss evaluation (default: val)
+  --quality-num-samples N        override FID/IS sample count
+  --results-dir PATH             override output directory for CSV files
 """
 
 import argparse
