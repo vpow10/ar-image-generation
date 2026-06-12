@@ -1,0 +1,45 @@
+seed: 42
+device: auto
+
+dataset:
+  name: pathmnist
+  root: data/medmnist
+  size: 64
+  batch_size: 256
+  num_workers: 2
+  download: true
+  normalize: true
+  as_rgb: true
+
+tokenizer:
+  name: vqvae_small
+  checkpoint_path: checkpoints/tokenizer/smoke_test_vqvae.pt
+  vocab_size: 128
+  embedding_dim: 64
+  hidden_channels: 32
+  downsample_factor: 8
+  train:
+    epochs: 3
+
+approach:
+  name: var
+  dim: 64
+  depth: 2
+  num_heads: 2
+  mlp_ratio: 2
+  dropout: 0.0
+  scales: [1, 2, 4, 8]
+  class_conditional: false
+
+train:
+  epochs: 3
+  mixed_precision: false
+  sample_every_epochs: 1
+  save_every_epochs: 1
+
+sampling:
+  num_samples: 16
+  top_k: 50
+
+logging:
+  run_name: smoke_test_var

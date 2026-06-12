@@ -13,28 +13,19 @@ dataset:
 
 tokenizer:
   name: vqvae_small
-  checkpoint_path: checkpoints/tokenizer/pathmnist64_vqvae_d4.pt
-  vocab_size: 1024
+  checkpoint_path: checkpoints/tokenizer/pathmnist64_vqvae.pt
+  vocab_size: 512
   embedding_dim: 128
   hidden_channels: 128
-  downsample_factor: 4
-
-  train:
-    epochs: 60
-    lr: 0.0002
-    weight_decay: 0.0
-    commitment_cost: 0.25
-    reconstruction_l1_weight: 1.0
-    reconstruction_mse_weight: 0.25
+  downsample_factor: 8
 
 approach:
-  name: var
-  dim: 256
-  depth: 4
-  num_heads: 4
+  name: raster
+  dim: 384
+  depth: 6
+  num_heads: 6
   mlp_ratio: 4
   dropout: 0.1
-  scales: [1, 2, 4, 8, 16]
   class_conditional: false
 
 train:
@@ -56,4 +47,4 @@ sampling:
 logging:
   use_wandb: false
   project: ar-image-generation
-  run_name: var_pathmnist64_d4
+  run_name: raster_pathmnist64_debug

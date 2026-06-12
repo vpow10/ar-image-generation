@@ -26,6 +26,8 @@ def import_builtin_approaches() -> None:
 
     # Importing modules triggers @register_approach decorators.
     import ar_image_generation.approaches.var.model  # noqa: F401
+    import ar_image_generation.approaches.raster.model  # noqa: F401
+    import ar_image_generation.approaches.maskgit.model  # noqa: F401
 
     _BUILTINS_IMPORTED = True
 
