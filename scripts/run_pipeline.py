@@ -1,18 +1,46 @@
 """
 Experiments pipeline.
 
-Always auto-trains tokenizer + approach if checkpoints are missing, then runs all experiments.
+*Auto-trains tokenizer + approach when checkpoints are missing
+*Device is selected automatically (CUDA/MPS/CPU)
 
---quick  default config: smoke_test_raster, 5 quality samples  (fast sanity check)
-normal   default config: FULL_APPROACHES,   full val split      (real results)
+Modes
+-----
+--quick   Smoke-test all three approaches with tiny models (3 epochs each).
+          Configs: smoke_test_raster, smoke_test_maskgit, smoke_test_var.
+          Tokenizer is trained once and reused across all three.
+          Quality evaluated on 5 generated samples.
 
---approaches overrides the config list in either mode (supports single approach).
+normal    Full training run for all three approaches on PathMNIST 64x64.
+          Configs: raster_pathmnist64_debug, maskgit_pathmnist64_debug, var_pathmnist64_d4.
+          Quality evaluated on the full val split (~10k images).
 
-Usage:
+--approaches overrides the config list in either mode (one or more paths).
+
+Approaches
+----------
+  raster   — causal raster-order autoregressive transformer (unconditional)
+  maskgit  — masked-token iterative generation (unconditional in debug config)
+  var      — Visual AutoRegressive generation via multiscale image pyramid
+
+Usage
+-----
+  # quick smoke test — all three approaches, auto device
   uv run python scripts/run_pipeline.py --quick
+
+  # full pipeline — all three approaches
   uv run python scripts/run_pipeline.py
+
+  # single approach, full mode
   uv run python scripts/run_pipeline.py --approaches configs/experiment/var_pathmnist64_d4.yaml
-  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/var_pathmnist64_d4.yaml
+
+  # single approach, quick mode
+  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/smoke_test_var.yaml
+
+  # two approaches at once
+  uv run python scripts/run_pipeline.py --approaches \\
+      configs/experiment/raster_pathmnist64_debug.yaml \\
+      configs/experiment/maskgit_pathmnist64_debug.yaml
 """
 
 import argparse
@@ -24,7 +52,11 @@ from pathlib import Path
 from ar_image_generation.config import load_experiment_config
 
 
-QUICK_CONFIG = Path("configs/experiment/smoke_test_raster.yaml")
+QUICK_CONFIGS = [
+    Path("configs/experiment/smoke_test_raster.yaml"),
+    Path("configs/experiment/smoke_test_maskgit.yaml"),
+    Path("configs/experiment/smoke_test_var.yaml"),
+]
 QUICK_QUALITY_SAMPLES = 5
 
 FULL_APPROACHES = [
@@ -57,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Quick mode: smoke_test_raster config, 5 quality samples. "
+        help="Quick mode: smoke_test_{raster,maskgit,var} configs, 5 quality samples. "
              "Auto-trains if checkpoints are missing.",
     )
     parser.add_argument(
@@ -141,7 +173,7 @@ def main() -> None:
     args = parse_args()
 
     # Resolve mode-dependent defaults
-    approaches = args.approaches or ([QUICK_CONFIG] if args.quick else FULL_APPROACHES)
+    approaches = args.approaches or (QUICK_CONFIGS if args.quick else FULL_APPROACHES)
     results_dir = args.results_dir or Path("runs/results/quick" if args.quick else "runs/results")
     quality_num_samples = args.quality_num_samples or (QUICK_QUALITY_SAMPLES if args.quick else None)
 
