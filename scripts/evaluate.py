@@ -467,6 +467,12 @@ def main() -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.csv is not None:
+        csv_path = Path(args.csv)
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        if csv_path.exists():
+            csv_path.unlink()
+
     tokenizer, model, checkpoint = load_models(
         cfg=cfg,
         checkpoint_path=checkpoint_path,
@@ -588,7 +594,7 @@ def main() -> None:
 
     save_json(metrics, output_dir / "metrics.json")
 
-    if args.csv is not None:
+    if args.csv is not None and args.quality:
         csv_row = {
             "approach": cfg.approach.name,
             "loss": loss_metrics["loss"],
