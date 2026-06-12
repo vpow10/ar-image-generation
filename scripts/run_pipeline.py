@@ -121,6 +121,11 @@ EXPERIMENTS: list[Experiment] = [
         csv_name="speed_quality.csv",
         extra_args=["--speed-quality", "--quality-split", "val", "--quality-batch-size", "64"],
     ),
+    Experiment(
+        name="tokenizer_quality",
+        csv_name="tokenizer_quality.csv",
+        extra_args=["--tokenizer-quality", "--tokenizer-quality-split", "test"],
+    ),
 ]
 
 

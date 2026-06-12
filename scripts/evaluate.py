@@ -106,6 +106,19 @@ def parse_args() -> argparse.Namespace:
         metavar="T",
         help="Temperature values for the --speed-quality sweep (default: 0.5 0.75 1.0 1.25 1.5).",
     )
+    parser.add_argument(
+        "--tokenizer-quality",
+        action="store_true",
+        help="Experiment 3: encode→decode reconstruction quality (PSNR, SSIM). "
+             "Independent of the generation approach — isolates tokenizer error.",
+    )
+    parser.add_argument(
+        "--tokenizer-quality-split",
+        type=str,
+        default="test",
+        choices=["train", "val", "test"],
+        help="Dataset split for tokenizer reconstruction evaluation (default: test).",
+    )
     return parser.parse_args()
 
 
@@ -376,6 +389,62 @@ def evaluate_speed_quality(
         )
 
 
+@torch.no_grad()
+def evaluate_tokenizer_quality(
+    *,
+    tokenizer: ImageTokenizer,
+    cfg: ExperimentConfig,
+    device: torch.device,
+    split: str,
+    csv_path: Path | None,
+) -> dict:
+    """Experiment 3: encode→decode reconstruction quality (PSNR, SSIM).
+
+    Independent of the generation approach — measures only information lost
+    in the tokenization step, before any generation error is introduced.
+    Images are normalized to [0, 1] before metric computation.
+    """
+    from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
+
+    psnr_metric = PeakSignalNoiseRatio(data_range=1.0).to(device)
+    ssim_metric = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
+
+    loader = build_medmnist_dataloader(cfg.dataset, split=split, shuffle=False)
+
+    print(f"\nExperiment 3: Tokenizer quality  (split={split})")
+
+    for batch in tqdm(loader, desc="tokenizer encode→decode", leave=False):
+        images = batch.images.to(device)
+
+        tokens = tokenizer.encode(images)
+        reconstructed = tokenizer.decode(tokens)
+
+        real = ((images + 1.0) / 2.0).clamp(0.0, 1.0)
+        recon = ((reconstructed + 1.0) / 2.0).clamp(0.0, 1.0)
+
+        psnr_metric.update(recon, real)
+        ssim_metric.update(recon, real)
+
+    psnr = psnr_metric.compute().item()
+    ssim = ssim_metric.compute().item()
+
+    row = {
+        "approach": cfg.approach.name,
+        "tokenizer_name": cfg.tokenizer.name,
+        "tokenizer_checkpoint": str(cfg.tokenizer.checkpoint_path),
+        "split": split,
+        "psnr_db": round(psnr, 4),
+        "ssim": round(ssim, 4),
+    }
+
+    if csv_path is not None:
+        append_csv_row(row, csv_path)
+
+    print(f"  PSNR={psnr:.2f} dB   SSIM={ssim:.4f}")
+
+    return row
+
+
 def main() -> None:
     args = parse_args()
 
@@ -469,6 +538,15 @@ def main() -> None:
             quality_batch_size=args.quality_batch_size,
             quality_num_samples=args.quality_num_samples,
             base_sampling_cfg=sampling_cfg,
+            csv_path=args.csv,
+        )
+
+    if args.tokenizer_quality:
+        evaluate_tokenizer_quality(
+            tokenizer=tokenizer,
+            cfg=cfg,
+            device=device,
+            split=args.tokenizer_quality_split,
             csv_path=args.csv,
         )
 
