@@ -83,7 +83,7 @@ class ExperimentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     seed: int = 42
-    device: Literal["auto", "cpu", "cuda"] = "auto"
+    device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
 
     dataset: DatasetConfig
     tokenizer: TokenizerConfig

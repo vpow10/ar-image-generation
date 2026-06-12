@@ -1,5 +1,5 @@
 seed: 47
-device: cuda
+device: auto
 
 dataset:
   name: pathmnist
