@@ -248,12 +248,9 @@ def evaluate_quality(
     quality_num_samples: int | None,
     sampling_cfg: SamplingConfig,
 ) -> dict[str, float | int]:
-    """Experiment 1: FID and IS against the full quality_split (default val, 10,004 images).
+    """Experiment 1: FID + IS against the full quality_split (default val, 10,004 images)"""
 
-    Streams images incrementally — no full-set tensor held in memory.
-    quality_num_samples caps both real and generated images (useful for smoke tests).
-    """
-    # FID/IS use float64 internally — not supported on MPS. Always run on CPU.
+    # FID/IS use float64 internally —> always run on CPU
     cpu = torch.device("cpu")
     fid = FrechetInceptionDistance(feature=2048, normalize=False).to(cpu)
     is_metric = InceptionScore(normalize=False).to(cpu)
@@ -320,8 +317,23 @@ def evaluate_speed_quality(
     base_sampling_cfg: SamplingConfig,
     csv_path: Path | None,
 ) -> None:
-    """Experiment 2: sweep temperatures, record FID/IS + speed at each setting."""
+    """Experiment 2: speed measured once, then FID/IS swept over temperatures."""
+
     print(f"\nExperiment 2: Speed–Quality sweep  (temperatures: {temperatures})")
+
+    speed = measure_sampling_speed(
+        sample_fn=lambda: generate_samples(
+            model=model,
+            tokenizer=tokenizer,
+            device=device,
+            sampling_cfg=base_sampling_cfg,
+        ),
+        num_samples=base_sampling_cfg.num_samples,
+        device=device,
+        warmup_steps=1,
+        measured_steps=3,
+    )
+    print(f"  speed: {speed.samples_per_second:.2f} samples/sec")
 
     for temperature in temperatures:
         sweep_cfg = SamplingConfig(
@@ -329,19 +341,6 @@ def evaluate_speed_quality(
             top_k=base_sampling_cfg.top_k,
             top_p=base_sampling_cfg.top_p,
             num_samples=base_sampling_cfg.num_samples,
-        )
-
-        speed = measure_sampling_speed(
-            sample_fn=lambda cfg=sweep_cfg: generate_samples(
-                model=model,
-                tokenizer=tokenizer,
-                device=device,
-                sampling_cfg=cfg,
-            ),
-            num_samples=sweep_cfg.num_samples,
-            device=device,
-            warmup_steps=1,
-            measured_steps=3,
         )
 
         quality = evaluate_quality(
@@ -372,7 +371,6 @@ def evaluate_speed_quality(
 
         print(
             f"  temp={temperature:.2f}  "
-            f"sps={speed.samples_per_second:.2f}  "
             f"FID={quality['fid']:.2f}  "
             f"IS={quality['inception_score_mean']:.2f}±{quality['inception_score_std']:.2f}"
         )
