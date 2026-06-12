@@ -26,8 +26,9 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from pydantic import ValidationError
 
-from ar_image_generation.config import load_experiment_config
+from ar_image_generation.config import load_experiment_config, load_yaml
 from ar_image_generation.evaluation.io import append_csv_row
 
 
@@ -94,9 +95,14 @@ def plot_convergence(
     any_data = False
 
     for config_path in configs:
-        cfg = load_experiment_config(config_path)
-        run_name = cfg.logging.run_name
-        approach = cfg.approach.name
+        try:
+            cfg = load_experiment_config(config_path)
+            run_name = cfg.logging.run_name
+            approach = cfg.approach.name
+        except (ValidationError, Exception):
+            raw = load_yaml(config_path)
+            run_name = raw["logging"]["run_name"]
+            approach = "custom"
         run_dir = Path("runs") / run_name
         records = load_metrics(run_dir)
 

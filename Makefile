@@ -16,62 +16,83 @@ typecheck:
 check: lint test
 
 
-# ── Quick mode ──────────────────────────────────────────────────────────
+# ── Config shorthands ────────────────────────────────────────────────────────
+RASTER   = configs/experiment/raster_pathmnist64_debug.yaml
+MASKGIT  = configs/experiment/maskgit_pathmnist64_debug.yaml
+VAR      = configs/experiment/var_pathmnist64_d4.yaml
+CUSTOM   = configs/experiment/custom_graft_gs_prior_pathmnist64.yaml
 
-# All approaches at once: Exp 1–3 + Exp 4 
+RASTER_Q  = configs/experiment/smoke_test_raster.yaml
+MASKGIT_Q = configs/experiment/smoke_test_maskgit.yaml
+VAR_Q     = configs/experiment/smoke_test_var.yaml
+
+FULL  = $(RASTER) $(MASKGIT) $(VAR) $(CUSTOM)
+
+
+# ── Quick mode  (smoke-test models, FID/IS limited to 5 samples) ─────────────
+
+# All 3 smoke models: Exp 1–3 + Exp 4
 pipeline-quick:
 	uv run python scripts/run_pipeline.py --quick
 
-# All approaches at once: Exp 4
+# Individual smoke model: Exp 1–3
+pipeline-quick-raster:
+	uv run python scripts/run_pipeline.py --quick --no-convergence --approaches $(RASTER_Q)
+
+pipeline-quick-maskgit:
+	uv run python scripts/run_pipeline.py --quick --no-convergence --approaches $(MASKGIT_Q)
+
+pipeline-quick-var:
+	uv run python scripts/run_pipeline.py --quick --no-convergence --approaches $(VAR_Q)
+
+# All 3 smoke models: Exp 4
 convergence-quick:
 	uv run python scripts/run_pipeline.py --quick --convergence-only
 
-# All *pre-trained full models* at once: Exp 1–3 + Exp 4
+
+# ── Quick mode  (full models, FID/IS limited to 5 samples) ─────────────
+
+# All 4 full models: Exp 1–3 + Exp 4
 pipeline-quick-full:
-	uv run python scripts/run_pipeline.py --quick \
-		--approaches configs/experiment/raster_pathmnist64_debug.yaml \
-		             configs/experiment/maskgit_pathmnist64_debug.yaml \
-		             configs/experiment/var_pathmnist64_d4.yaml
+	uv run python scripts/run_pipeline.py --quick --approaches $(FULL)
 
-# Individual approaches: Exp 1–3 only
-pipeline-quick-raster:
-	uv run python scripts/run_pipeline.py --quick --no-convergence \
-		--approaches configs/experiment/smoke_test_raster.yaml
+# Individual full model: Exp 1–3
+pipeline-quick-full-raster:
+	uv run python scripts/run_pipeline.py --quick --no-convergence --approaches $(RASTER)
 
-pipeline-quick-maskgit:
-	uv run python scripts/run_pipeline.py --quick --no-convergence \
-		--approaches configs/experiment/smoke_test_maskgit.yaml
+pipeline-quick-full-maskgit:
+	uv run python scripts/run_pipeline.py --quick --no-convergence --approaches $(MASKGIT)
 
-pipeline-quick-var:
-	uv run python scripts/run_pipeline.py --quick --no-convergence \
-		--approaches configs/experiment/smoke_test_var.yaml
+pipeline-quick-full-var:
+	uv run python scripts/run_pipeline.py --quick --no-convergence --approaches $(VAR)
+
+pipeline-quick-full-custom:
+	uv run python scripts/run_pipeline.py --quick --no-convergence --approaches $(CUSTOM)
+
+# All 4 full models: Exp 4
+convergence-quick-full:
+	uv run python scripts/run_pipeline.py --quick --convergence-only --approaches $(FULL)
 
 
-# ── Full mode ──────────────────────────────────────────────────────────
+# ── Full mode  (full val split, ~10k images) ─────────────────────────────────
 
-# All *pre-trained full models* at once: Exp 1–3 + Exp 4
-pipeline:
-	uv run python scripts/run_pipeline.py \
-		--approaches configs/experiment/raster_pathmnist64_debug.yaml \
-		             configs/experiment/maskgit_pathmnist64_debug.yaml \
-		             configs/experiment/var_pathmnist64_d4.yaml
+# All 4 full models: Exp 1–3 + Exp 4
+pipeline-full:
+	uv run python scripts/run_pipeline.py --approaches $(FULL)
 
-# Individual approaches: Exp 1–3 only
+# Individual full model: Exp 1–3
 pipeline-raster:
-	uv run python scripts/run_pipeline.py --no-convergence \
-		--approaches configs/experiment/raster_pathmnist64_debug.yaml
+	uv run python scripts/run_pipeline.py --no-convergence --approaches $(RASTER)
 
 pipeline-maskgit:
-	uv run python scripts/run_pipeline.py --no-convergence \
-		--approaches configs/experiment/maskgit_pathmnist64_debug.yaml
+	uv run python scripts/run_pipeline.py --no-convergence --approaches $(MASKGIT)
 
 pipeline-var:
-	uv run python scripts/run_pipeline.py --no-convergence \
-		--approaches configs/experiment/var_pathmnist64_d4.yaml
+	uv run python scripts/run_pipeline.py --no-convergence --approaches $(VAR)
 
-# All *pre-trained full models* at once: Exp 4
-convergence:
-	uv run python scripts/run_pipeline.py --convergence-only \
-		--approaches configs/experiment/raster_pathmnist64_debug.yaml \
-		             configs/experiment/maskgit_pathmnist64_debug.yaml \
-		             configs/experiment/var_pathmnist64_d4.yaml
+pipeline-custom:
+	uv run python scripts/run_pipeline.py --no-convergence --approaches $(CUSTOM)
+
+# All 4 full models: Exp 4
+convergence-full:
+	uv run python scripts/run_pipeline.py --convergence-only --approaches $(FULL)

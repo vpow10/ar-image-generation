@@ -2,78 +2,117 @@
 Experiments pipeline.
 
 Auto-trains tokenizer + approach when checkpoints are missing, then runs all experiments.
-Device is selected automatically (CUDA -> MPS -> CPU).
+Device is selected automatically (CUDA → MPS → CPU).
 
-Experiments (run for every approach)
--------------------------------------
-  I.  quality       — FID + Inception Score on the val split  → quality.csv
-  II. speed_quality — FID + IS + samples/sec swept over temperatures → speed_quality.csv
+Experiments
+-----------
+  I.   quality          — FID + Inception Score on the val split       → quality.csv
+  II.  speed_quality    — FID + IS swept over temperatures + speed     → speed_quality.csv
+  III. tokenizer_quality— PSNR + SSIM on encode→decode reconstruction  → tokenizer_quality.csv
+  IV.  convergence      — val loss vs epoch for all approaches combined → convergence.png / convergence.csv
+                          (requires metrics.jsonl written during training)
 
-Approaches
-----------
-  raster   — causal raster-order autoregressive transformer (unconditional)
-  maskgit  — masked-token iterative generation (unconditional in debug config)
+Approaches (standard — use evaluate.py)
+-----------------------------------------
+  raster   — causal raster-order autoregressive transformer
+  maskgit  — masked-token iterative generation
   var      — Visual AutoRegressive generation via multiscale image pyramid
+
+Custom approach (uses evaluate_custom.py automatically)
+--------------------------------------------------------
+  custom   — GRAFT-GS Gaussian splatting prior (GaussianPrimitiveAR + GaussianSplatTokenizer)
+             Checkpoint expected at: runs/<run_name>/checkpoints/best.pt
+             Training: scripts/train_graft_gs_prior.py  (separate, not auto-triggered)
+
+Results layout
+--------------
+  runs/results[/quick]/<config_stem>/quality.csv
+  runs/results[/quick]/<config_stem>/speed_quality.csv
+  runs/results[/quick]/<config_stem>/tokenizer_quality.csv
+  runs/results[/quick]/convergence.png
+  runs/results[/quick]/convergence.csv
 
 =============================
  QUICK MODE  (--quick flag)
 =============================
-Limits FID/IS to 5 generated samples. Auto-trains if checkpoints are missing.
+Limits FID/IS to 5 generated samples. Auto-trains standard models if checkpoints missing.
 
   -- Small models (smoke test, ~minutes) --
 
-  # all 3 approaches at once
+  # all 3 standard approaches + Exp 4
   uv run python scripts/run_pipeline.py --quick
 
-  # raster only
-  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/smoke_test_raster.yaml
+  # single approach, Exp 1–3 only
+  uv run python scripts/run_pipeline.py --quick --no-convergence \\
+      --approaches configs/experiment/smoke_test_raster.yaml
 
-  # maskgit only
-  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/smoke_test_maskgit.yaml
+  uv run python scripts/run_pipeline.py --quick --no-convergence \\
+      --approaches configs/experiment/smoke_test_maskgit.yaml
 
-  # var only
-  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/smoke_test_var.yaml
+  uv run python scripts/run_pipeline.py --quick --no-convergence \\
+      --approaches configs/experiment/smoke_test_var.yaml
+
+  # Exp 4 only (learning curves), smoke test models
+  uv run python scripts/run_pipeline.py --quick --convergence-only
 
   -- Full models, quick eval (pre-trained checkpoints required) --
 
-  # all 3 approaches at once
+  # all 3 standard approaches + Exp 4
   uv run python scripts/run_pipeline.py --quick \\
       --approaches configs/experiment/raster_pathmnist64_debug.yaml \\
                    configs/experiment/maskgit_pathmnist64_debug.yaml \\
                    configs/experiment/var_pathmnist64_d4.yaml
 
-  # raster only
-  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/raster_pathmnist64_debug.yaml
+  # all 4 approaches (including custom) + Exp 4
+  uv run python scripts/run_pipeline.py --quick \\
+      --approaches configs/experiment/raster_pathmnist64_debug.yaml \\
+                   configs/experiment/maskgit_pathmnist64_debug.yaml \\
+                   configs/experiment/var_pathmnist64_d4.yaml \\
+                   configs/experiment/custom_graft_gs_prior_pathmnist64.yaml
 
-  # maskgit only
-  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/maskgit_pathmnist64_debug.yaml
-
-  # var only
-  uv run python scripts/run_pipeline.py --quick --approaches configs/experiment/var_pathmnist64_d4.yaml
+  # single approach, Exp 1–3 only
+  uv run python scripts/run_pipeline.py --quick --no-convergence \\
+      --approaches configs/experiment/raster_pathmnist64_debug.yaml
 
 =============================
  FULL MODE  (no --quick)
 =============================
-FID/IS evaluated on the full val split (~10k images). Trains from scratch if needed.
+FID/IS evaluated on the full val split (~10k images). Trains standard models from scratch if needed.
 
-  -- All 3 approaches at once --
+  # all 3 standard approaches + Exp 4
+  uv run python scripts/run_pipeline.py \\
+      --approaches configs/experiment/raster_pathmnist64_debug.yaml \\
+                   configs/experiment/maskgit_pathmnist64_debug.yaml \\
+                   configs/experiment/var_pathmnist64_d4.yaml
 
-  uv run python scripts/run_pipeline.py
+  # all 4 approaches (including custom) + Exp 4
+  uv run python scripts/run_pipeline.py \\
+      --approaches configs/experiment/raster_pathmnist64_debug.yaml \\
+                   configs/experiment/maskgit_pathmnist64_debug.yaml \\
+                   configs/experiment/var_pathmnist64_d4.yaml \\
+                   configs/experiment/custom_graft_gs_prior_pathmnist64.yaml
 
-  -- Single approach --
+  # single approach, Exp 1–3 only
+  uv run python scripts/run_pipeline.py --no-convergence \\
+      --approaches configs/experiment/raster_pathmnist64_debug.yaml
 
-  # raster only
-  uv run python scripts/run_pipeline.py --approaches configs/experiment/raster_pathmnist64_debug.yaml
+  uv run python scripts/run_pipeline.py --no-convergence \\
+      --approaches configs/experiment/maskgit_pathmnist64_debug.yaml
 
-  # maskgit only
-  uv run python scripts/run_pipeline.py --approaches configs/experiment/maskgit_pathmnist64_debug.yaml
+  uv run python scripts/run_pipeline.py --no-convergence \\
+      --approaches configs/experiment/var_pathmnist64_d4.yaml
 
-  # var only
-  uv run python scripts/run_pipeline.py --approaches configs/experiment/var_pathmnist64_d4.yaml
+  # Exp 4 only (learning curves), full models
+  uv run python scripts/run_pipeline.py --convergence-only \\
+      --approaches configs/experiment/raster_pathmnist64_debug.yaml \\
+                   configs/experiment/maskgit_pathmnist64_debug.yaml \\
+                   configs/experiment/var_pathmnist64_d4.yaml
 
 =============================
  OTHER OPTIONS
 =============================
+  --no-convergence               skip Exp 4 (useful when running a single approach)
+  --convergence-only             run only Exp 4; skip training checks and Exp 1–3
   --split {train,val,test}       dataset split for loss evaluation (default: val)
   --quality-num-samples N        override FID/IS sample count
   --results-dir PATH             override output directory for CSV files
@@ -85,7 +124,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ar_image_generation.config import load_experiment_config
+from pydantic import ValidationError
+
+from ar_image_generation.config import load_experiment_config, load_yaml
 
 
 QUICK_CONFIGS = [
@@ -183,8 +224,27 @@ def _run(cmd: list[str]) -> int:
     return subprocess.run(cmd).returncode
 
 
+def is_custom_config(config: Path) -> bool:
+    """Return True if the config cannot be parsed as a standard ExperimentConfig."""
+    try:
+        load_experiment_config(config)
+        return False
+    except (ValidationError, Exception):
+        return True
+
+
 def ensure_checkpoints(config: Path) -> bool:
     """Train tokenizer then approach if either checkpoint is missing. Returns True on success."""
+    if is_custom_config(config):
+        raw = load_yaml(config)
+        run_name = raw["logging"]["run_name"]
+        approach_ckpt = Path("runs") / run_name / "checkpoints" / "best.pt"
+        if not approach_ckpt.exists():
+            print(f"  Custom approach checkpoint missing: {approach_ckpt}")
+            print(f"  Train manually with the appropriate graft-gs script, then re-run.")
+            return False
+        return True
+
     cfg = load_experiment_config(config)
 
     if not cfg.tokenizer.checkpoint_path.exists():
@@ -213,8 +273,13 @@ def run_experiment(
 ) -> int:
     approach_name = approach_config.stem
     csv_path = results_dir / approach_name / experiment.csv_name
+    evaluate_script = (
+        "scripts/evaluate_custom.py"
+        if is_custom_config(approach_config)
+        else "scripts/evaluate.py"
+    )
     cmd = [
-        sys.executable, "scripts/evaluate.py",
+        sys.executable, evaluate_script,
         "--config", str(approach_config),
         "--split", split,
         "--csv", str(csv_path),
