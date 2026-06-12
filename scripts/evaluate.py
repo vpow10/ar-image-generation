@@ -92,6 +92,20 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="CSV file to append one result row to (shared across all approaches for one experiment).",
     )
+    parser.add_argument(
+        "--speed-quality",
+        action="store_true",
+        help="Experiment 2: sweep temperatures and record FID/IS + samples/sec at each "
+             "to produce a speed-quality trade-off curve.",
+    )
+    parser.add_argument(
+        "--speed-quality-temperatures",
+        nargs="+",
+        type=float,
+        default=[0.5, 0.75, 1.0, 1.25, 1.5],
+        metavar="T",
+        help="Temperature values for the --speed-quality sweep (default: 0.5 0.75 1.0 1.25 1.5).",
+    )
     return parser.parse_args()
 
 
@@ -292,6 +306,78 @@ def evaluate_quality(
     }
 
 
+@torch.no_grad()
+def evaluate_speed_quality(
+    *,
+    model: AutoregressiveApproach,
+    tokenizer: ImageTokenizer,
+    cfg: ExperimentConfig,
+    device: torch.device,
+    temperatures: list[float],
+    quality_split: str,
+    quality_batch_size: int,
+    quality_num_samples: int | None,
+    base_sampling_cfg: SamplingConfig,
+    csv_path: Path | None,
+) -> None:
+    """Experiment 2: sweep temperatures, record FID/IS + speed at each setting."""
+    print(f"\nExperiment 2: Speed–Quality sweep  (temperatures: {temperatures})")
+
+    for temperature in temperatures:
+        sweep_cfg = SamplingConfig(
+            temperature=temperature,
+            top_k=base_sampling_cfg.top_k,
+            top_p=base_sampling_cfg.top_p,
+            num_samples=base_sampling_cfg.num_samples,
+        )
+
+        speed = measure_sampling_speed(
+            sample_fn=lambda cfg=sweep_cfg: generate_samples(
+                model=model,
+                tokenizer=tokenizer,
+                device=device,
+                sampling_cfg=cfg,
+            ),
+            num_samples=sweep_cfg.num_samples,
+            device=device,
+            warmup_steps=1,
+            measured_steps=3,
+        )
+
+        quality = evaluate_quality(
+            model=model,
+            tokenizer=tokenizer,
+            cfg=cfg,
+            device=device,
+            quality_split=quality_split,
+            quality_batch_size=quality_batch_size,
+            quality_num_samples=quality_num_samples,
+            sampling_cfg=sweep_cfg,
+        )
+
+        row: dict = {
+            "approach": cfg.approach.name,
+            "temperature": temperature,
+            "top_k": sweep_cfg.top_k if sweep_cfg.top_k is not None else "",
+            "samples_per_second": round(speed.samples_per_second, 4),
+            "fid": round(quality["fid"], 4),
+            "inception_score_mean": round(quality["inception_score_mean"], 4),
+            "inception_score_std": round(quality["inception_score_std"], 4),
+            "num_real": quality["num_real"],
+            "num_generated": quality["num_generated"],
+        }
+
+        if csv_path is not None:
+            append_csv_row(row, csv_path)
+
+        print(
+            f"  temp={temperature:.2f}  "
+            f"sps={speed.samples_per_second:.2f}  "
+            f"FID={quality['fid']:.2f}  "
+            f"IS={quality['inception_score_mean']:.2f}±{quality['inception_score_std']:.2f}"
+        )
+
+
 def main() -> None:
     args = parse_args()
 
@@ -372,6 +458,20 @@ def main() -> None:
             quality_batch_size=args.quality_batch_size,
             quality_num_samples=args.quality_num_samples,
             sampling_cfg=sampling_cfg,
+        )
+
+    if args.speed_quality:
+        evaluate_speed_quality(
+            model=model,
+            tokenizer=tokenizer,
+            cfg=cfg,
+            device=device,
+            temperatures=args.speed_quality_temperatures,
+            quality_split=args.quality_split,
+            quality_batch_size=args.quality_batch_size,
+            quality_num_samples=args.quality_num_samples,
+            base_sampling_cfg=sampling_cfg,
+            csv_path=args.csv,
         )
 
     metrics = {

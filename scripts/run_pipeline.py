@@ -80,7 +80,11 @@ EXPERIMENTS: list[Experiment] = [
         csv_name="quality.csv",
         extra_args=["--quality", "--quality-split", "val", "--quality-batch-size", "64"],
     ),
-    # future experiments: add here
+    Experiment(
+        name="speed_quality",
+        csv_name="speed_quality.csv",
+        extra_args=["--speed-quality", "--quality-split", "val", "--quality-batch-size", "64"],
+    ),
 ]
 
 
