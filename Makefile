@@ -80,6 +80,10 @@ convergence-quick-full:
 pipeline-full:
 	uv run python scripts/run_pipeline.py --approaches $(FULL)
 
+# All 4 full models: Exp 1,2  with limited samples number + Exp 3 + Exp 4
+pipeline-full-1000:
+	uv run python scripts/run_pipeline.py --approaches $(FULL) --quality-num-samples 1000
+
 # Individual full model: Exp 1–3
 pipeline-raster:
 	uv run python scripts/run_pipeline.py --no-convergence --approaches $(RASTER)
